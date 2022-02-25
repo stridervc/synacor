@@ -24,8 +24,8 @@ dependencies:
 
 library:
   source-dirs: src
-#  dependencies:
-#  - text
+  dependencies:
+  - mtl
 
 executables:
   synacor:

@@ -1,6 +1,7 @@
 module Main where
 
-import Lib
+import VM
 
 main :: IO ()
-main = someFunc
+main = do
+  print newVMState
