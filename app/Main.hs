@@ -1,7 +1,7 @@
 module Main where
 
-import VM
+import VMState
 
 main :: IO ()
 main = do
-  print newVMState
+  runVM $ newVMFromInts [ 9, 32768, 32769, 4, 19, 32768 ]

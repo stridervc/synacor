@@ -25,8 +25,7 @@ source-repository head
 
 library
   exposed-modules:
-      Lib
-      VM
+      VMState
   other-modules:
       Paths_synacor
   hs-source-dirs:
