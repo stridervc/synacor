@@ -78,6 +78,7 @@ stepVM :: VMState -> IO VMState
 stepVM state = do
   case op of
     0   -> return $ (incIP 1) { vmHalt = True }
+    6   -> return $ state { vmIP = valA }
     9   -> return $ writeMemoryOrRegister argA ((valB + valC) `mod` 32768) $ incIP 4
     19  -> do
       putChar $ chr argA
