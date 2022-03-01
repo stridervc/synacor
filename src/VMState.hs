@@ -2,12 +2,14 @@ module VMState
   ( VMState (..)
   , newVMState
   , newVMFromInts
+  , newVMFromFile
   , stepVM
   , runVM
   , dumpRegisters
   ) where
 
-import Data.Char (chr)
+import Data.Char (chr, ord)
+import Data.Bits (shiftL)
 
 type Register   = Int
 type Operator   = Int
@@ -32,6 +34,16 @@ newVMState = VMState
 newVMFromInts :: [Int] -> VMState
 newVMFromInts input = newVMState { vmMemory = input <> fill }
   where fill  = replicate (32768 - length input) 0
+
+charPairsToInts :: [Char] -> [Int]
+charPairsToInts []        = []
+charPairsToInts (a:b:rem) = (ord b `shiftL` 8 + ord a) : charPairsToInts rem
+charPairsToInts _         = error "Invalid arguments to charPairsToInts"
+
+newVMFromFile :: FilePath -> IO VMState
+newVMFromFile f = do
+  contents <- readFile f
+  return $ newVMFromInts $ charPairsToInts contents
 
 readMemory :: Int -> VMState -> Int
 readMemory n state = vmMemory state !! n
@@ -71,7 +83,7 @@ stepVM state = do
       putChar $ chr argA
       return $ incIP 2
     21  -> return $ incIP 1
-    _   -> undefined
+    _   -> error $ "Unknown opcode " <> show op
   where incIP n = state { vmIP = vmIP state + n }
         ip      = vmIP state
         op      = readMemory ip state
