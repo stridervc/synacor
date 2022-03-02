@@ -49,26 +49,20 @@ newVMFromFile f = do
   return $ newVMFromInts $ charPairsToInts contents
 
 readMemory :: Int -> VMUpdater Int
-readMemory n = do
-  state <- get
-  return $ vmMemory state !! n
+readMemory n = gets (\state -> vmMemory state !! n)
 
 writeMemory :: Int -> Int -> VMUpdater ()
 writeMemory n val = do
-  state <- get
-  let mem = vmMemory state
-  put $ state { vmMemory = take n mem <> [val] <> drop (n+1) mem }
+  mem <- gets vmMemory
+  modify (\state -> state { vmMemory = take n mem <> [val] <> drop (n+1) mem })
 
 readRegister :: Int -> VMUpdater Int
-readRegister n = do
-  state <- get
-  return $ vmRegisters state !! n
+readRegister n = gets (\state -> vmRegisters state !! n)
 
 writeRegister :: Int -> Int -> VMUpdater ()
 writeRegister n val = do
-  state <- get
-  let regs = vmRegisters state
-  put $ state { vmRegisters = take n regs <> [val] <> drop (n+1) regs }
+  regs <- gets vmRegisters
+  modify (\state -> state { vmRegisters = take n regs <> [val] <> drop (n+1) regs })
 
 writeMemoryOrRegister :: Int -> Int -> VMUpdater ()
 writeMemoryOrRegister n val
@@ -78,8 +72,7 @@ writeMemoryOrRegister n val
 -- get argument n for current operation
 readArg :: Int -> VMUpdater Int
 readArg n = do
-  state <- get
-  let ip = vmIP state
+  ip <- readIP
   readMemory (ip+1+n)
 
 -- get argument n for current operation, converting to value in register if needed
@@ -88,11 +81,13 @@ argValue n = do
   arg <- readArg n
   if arg >= 32768 then readRegister (arg-32768) else return arg
 
+readIP :: VMUpdater Int
+readIP = gets vmIP
+
 incIP :: Int -> VMUpdater ()
 incIP n = do
-  state <- get
-  let ip = vmIP state
-  put $ state { vmIP = ip + n }
+  ip <- readIP
+  modify (\s -> s { vmIP = ip + n })
 
 decodeOpCode :: Int -> String
 decodeOpCode 0  = "HALT"
@@ -104,8 +99,7 @@ decodeOpCode n  = error $ "Unknown opcode " <> show n
 
 stepVM' :: VMUpdater ()
 stepVM' = do
-  state <- get
-  let ip = vmIP state
+  ip    <- readIP
   op    <- readMemory ip
   argA  <- readArg 0
   argB  <- readArg 1
