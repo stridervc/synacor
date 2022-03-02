@@ -95,15 +95,15 @@ incIP n = do
   put $ state { vmIP = ip + n }
 
 decodeOpCode :: Int -> String
-decodeOpCode 0  = "HLT"
+decodeOpCode 0  = "HALT"
 decodeOpCode 6  = "JMP"
 decodeOpCode 9  = "ADD"
 decodeOpCode 19 = "OUT"
 decodeOpCode 21 = "NOP"
 decodeOpCode n  = error $ "Unknown opcode " <> show n
 
-stepVM :: VMUpdater ()
-stepVM = do
+stepVM' :: VMUpdater ()
+stepVM' = do
   state <- get
   let ip = vmIP state
   op    <- readMemory ip
@@ -115,17 +115,20 @@ stepVM = do
   valC  <- argValue 2
 
   case decodeOpCode op of
-    "HLT" -> halt
-    "JMP" -> modify (\s -> s { vmIP = valA })
-    "ADD" -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> incIP 4
-    "OUT" -> liftIO (putChar $ chr valA) >> incIP 2
-    "NOP" -> incIP 1
-    _     -> halt
+    "HALT"  -> halt
+    "JMP"   -> modify (\s -> s { vmIP = valA })
+    "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> incIP 4
+    "OUT"   -> liftIO (putChar $ chr valA) >> incIP 2
+    "NOP"   -> incIP 1
+    _       -> halt
   where halt  = modify (\s -> s { vmHalt = True })
+
+stepVM :: VMState -> IO VMState
+stepVM = execStateT stepVM'
 
 runVM :: VMState -> IO VMState
 runVM state = do
-  state' <- execStateT stepVM state
+  state' <- stepVM state
   if vmHalt state' then return state' else runVM state'
 
 dumpRegisters :: VMState -> IO ()

@@ -26,6 +26,7 @@ library:
   source-dirs: src
   dependencies:
   - mtl
+  - ansi-terminal
 
 executables:
   synacor:
@@ -37,7 +38,6 @@ executables:
     - -with-rtsopts=-N
     dependencies:
     - synacor
-#   - text
 
 tests:
   synacor-test:
