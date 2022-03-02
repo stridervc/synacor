@@ -7,21 +7,28 @@ import System.IO (hFlush, stdout)
 import System.Console.ANSI
 import Control.Monad (when)
 
-debugRun :: VMState -> IO VMState
-debugRun state = do
-  Just (y,x) <- getCursorPosition
-  putStrLn ""
+prompt :: IO (Int, Int)
+prompt = do
+  Just (y, x)   <- getCursorPosition
+  Just (sy, sx) <- getTerminalSize
+  when (y + 1 == sy) $ scrollPageUp 1
+  setCursorPosition (sy-1) 0
   putStr "> "
   hFlush stdout
+  if y + 1 == sy then return (y-1, x) else return (y, x)
+
+debugRun :: VMState -> IO VMState
+debugRun state = do
+  (y, x) <- prompt
   input <- getLine
-  cursorUpLine 1
+  scrollPageDown 1
   clearLine
-  cursorUpLine 1
-  when (x > 0) $ cursorForward x
+  setCursorPosition y x
 
   case input of
     "quit"  -> return state
+    "run"   -> runVM state
     ""      -> do
       state' <- stepVM state
       debugRun state'
-    _       -> putStrLn input >> debugRun state
+    _       -> debugRun state
