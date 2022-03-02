@@ -118,9 +118,9 @@ stepVM = do
     "HLT" -> halt
     "JMP" -> modify (\s -> s { vmIP = valA })
     "ADD" -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> incIP 4
-    "OUT" -> liftIO (putChar $ chr argA) >> incIP 2
+    "OUT" -> liftIO (putChar $ chr valA) >> incIP 2
     "NOP" -> incIP 1
-    _     -> error $ "Unknown opcode " <> show op
+    _     -> halt
   where halt  = modify (\s -> s { vmHalt = True })
 
 runVM :: VMState -> IO VMState
