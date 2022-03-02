@@ -10,9 +10,12 @@ module VMState
 
 import Data.Char (chr, ord)
 import Data.Bits (shiftL)
+import Control.Monad.State
 
 type Register   = Int
 type Operator   = Int
+
+type VMUpdater = StateT VMState IO
 
 data VMState = VMState
   { vmMemory    :: [Int]      -- ^ 32768 Integers
@@ -45,71 +48,96 @@ newVMFromFile f = do
   contents <- readFile f
   return $ newVMFromInts $ charPairsToInts contents
 
-readMemory :: Int -> VMState -> Int
-readMemory n state = vmMemory state !! n
+readMemory :: Int -> VMUpdater Int
+readMemory n = do
+  state <- get
+  return $ vmMemory state !! n
 
-writeMemory :: Int -> Int -> VMState -> VMState
-writeMemory n val state = state { vmMemory = take n mem <> [val] <> drop (n+1) mem }
-  where mem = vmMemory state
+writeMemory :: Int -> Int -> VMUpdater ()
+writeMemory n val = do
+  state <- get
+  let mem = vmMemory state
+  put $ state { vmMemory = take n mem <> [val] <> drop (n+1) mem }
 
-readRegister :: Int -> VMState -> Int
-readRegister n state = vmRegisters state !! n
+readRegister :: Int -> VMUpdater Int
+readRegister n = do
+  state <- get
+  return $ vmRegisters state !! n
 
-writeRegister :: Int -> Int -> VMState -> VMState
-writeRegister n val state = state { vmRegisters = take n regs <> [val] <> drop (n+1) regs }
-  where regs = vmRegisters state
+writeRegister :: Int -> Int -> VMUpdater ()
+writeRegister n val = do
+  state <- get
+  let regs = vmRegisters state
+  put $ state { vmRegisters = take n regs <> [val] <> drop (n+1) regs }
 
-writeMemoryOrRegister :: Int -> Int -> VMState -> VMState
-writeMemoryOrRegister n val state
-  | n < 32768 = writeMemory n val state
-  | otherwise = writeRegister (n-32768) val state
+writeMemoryOrRegister :: Int -> Int -> VMUpdater ()
+writeMemoryOrRegister n val
+  | n < 32768 = writeMemory n val
+  | otherwise = writeRegister (n-32768) val
 
 -- get argument n for current operation
-readArg :: Int -> VMState -> Int
-readArg n state = readMemory (ip+1+n) state
-  where ip = vmIP state
+readArg :: Int -> VMUpdater Int
+readArg n = do
+  state <- get
+  let ip = vmIP state
+  readMemory (ip+1+n)
 
 -- get argument n for current operation, converting to value in register if needed
-argValue :: Int -> VMState -> Int
-argValue n state = if arg >= 32768 then readRegister (arg-32768) state else arg
-  where arg = readArg n state
+argValue :: Int -> VMUpdater Int
+argValue n = do
+  arg <- readArg n
+  if arg >= 32768 then readRegister (arg-32768) else return arg
 
-stepVM :: VMState -> IO VMState
-stepVM state = do
-  case op of
-    0   -> return $ (incIP 1) { vmHalt = True }
-    6   -> return $ state { vmIP = valA }
-    9   -> return $ writeMemoryOrRegister argA ((valB + valC) `mod` 32768) $ incIP 4
-    19  -> do
-      putChar $ chr argA
-      return $ incIP 2
-    21  -> return $ incIP 1
-    _   -> error $ "Unknown opcode " <> show op
-  where incIP n = state { vmIP = vmIP state + n }
-        ip      = vmIP state
-        op      = readMemory ip state
-        argA    = readArg 0 state
-        argB    = readArg 1 state
-        argC    = readArg 2 state
-        valA    = argValue 0 state
-        valB    = argValue 1 state
-        valC    = argValue 2 state
+incIP :: Int -> VMUpdater ()
+incIP n = do
+  state <- get
+  let ip = vmIP state
+  put $ state { vmIP = ip + n }
+
+decodeOpCode :: Int -> String
+decodeOpCode 0  = "HLT"
+decodeOpCode 6  = "JMP"
+decodeOpCode 9  = "ADD"
+decodeOpCode 19 = "OUT"
+decodeOpCode 21 = "NOP"
+decodeOpCode n  = error $ "Unknown opcode " <> show n
+
+stepVM :: VMUpdater ()
+stepVM = do
+  state <- get
+  let ip = vmIP state
+  op    <- readMemory ip
+  argA  <- readArg 0
+  argB  <- readArg 1
+  argC  <- readArg 2
+  valA  <- argValue 0
+  valB  <- argValue 1
+  valC  <- argValue 2
+
+  case decodeOpCode op of
+    "HLT" -> halt
+    "JMP" -> modify (\s -> s { vmIP = valA })
+    "ADD" -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> incIP 4
+    "OUT" -> liftIO (putChar $ chr argA) >> incIP 2
+    "NOP" -> incIP 1
+    _     -> error $ "Unknown opcode " <> show op
+  where halt  = modify (\s -> s { vmHalt = True })
 
 runVM :: VMState -> IO VMState
 runVM state = do
-  state' <- stepVM state
+  state' <- execStateT stepVM state
   if vmHalt state' then return state' else runVM state'
 
 dumpRegisters :: VMState -> IO ()
 dumpRegisters state = do
   putStrLn $ "IP = " <> show (vmIP state)
-  putStrLn $ "R0 = " <> show (readRegister 0 state)
-  putStrLn $ "R1 = " <> show (readRegister 1 state)
-  putStrLn $ "R2 = " <> show (readRegister 2 state)
-  putStrLn $ "R3 = " <> show (readRegister 3 state)
-  putStrLn $ "R4 = " <> show (readRegister 4 state)
-  putStrLn $ "R5 = " <> show (readRegister 5 state)
-  putStrLn $ "R6 = " <> show (readRegister 6 state)
-  putStrLn $ "R7 = " <> show (readRegister 7 state)
+  putStrLn $ "R0 = " <> show (head $ vmRegisters state)
+  putStrLn $ "R1 = " <> show (vmRegisters state !! 1)
+  putStrLn $ "R2 = " <> show (vmRegisters state !! 2)
+  putStrLn $ "R3 = " <> show (vmRegisters state !! 3)
+  putStrLn $ "R4 = " <> show (vmRegisters state !! 4)
+  putStrLn $ "R5 = " <> show (vmRegisters state !! 5)
+  putStrLn $ "R6 = " <> show (vmRegisters state !! 6)
+  putStrLn $ "R7 = " <> show (vmRegisters state !! 7)
   putStrLn $ "HALT = " <> show (vmHalt state)
 
