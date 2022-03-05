@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      BrickRunner
       DebugRunner
       VMState
   other-modules:
@@ -34,6 +35,7 @@ library
   build-depends:
       ansi-terminal
     , base >=4.7 && <5
+    , brick
     , mtl
   default-language: Haskell2010
 

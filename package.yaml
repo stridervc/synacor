@@ -27,6 +27,7 @@ library:
   dependencies:
   - mtl
   - ansi-terminal
+  - brick
 
 executables:
   synacor:
