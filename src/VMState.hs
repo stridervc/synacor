@@ -11,8 +11,8 @@ module VMState
   ) where
 
 import Decoder
+import Data.Bits
 import Data.Char (chr, ord)
-import Data.Bits (shiftL)
 import Control.Monad.State
 import Control.Monad.Extra (whenJust)
 import System.IO (openBinaryFile, hGetContents, IOMode(..))
@@ -106,6 +106,7 @@ popStack = do
   modify (\s -> s { vmStack = tail stack })
   return $ head stack
 
+-- TODO set breakpoint 06e2
 stepVM' :: VMUpdater (Maybe Char)
 stepVM' = do
   ip    <- readIP
@@ -126,10 +127,19 @@ stepVM' = do
     "GT"    -> writeMemoryOrRegister argA (if valB > valC then 1 else 0) >> adv op >> return Nothing
     "JMP"   -> jmp valA >> return Nothing
     "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> adv op >> return Nothing
+    "MUL"   -> writeMemoryOrRegister argA ((valB * valC) `mod` 32768) >> adv op >> return Nothing
+    "MOD"   -> writeMemoryOrRegister argA (valB `mod` valC) >> adv op >> return Nothing
+    "AND"   -> writeMemoryOrRegister argA (valB .&. valC) >> adv op >> return Nothing
+    "OR"    -> writeMemoryOrRegister argA (valB .|. valC) >> adv op >> return Nothing
+    "NOT"   -> writeMemoryOrRegister argA (complement valB .&. 32767) >> adv op >> return Nothing
+    "RMEM"  -> readMemory valB >>= writeMemoryOrRegister argA >> adv op >> return Nothing
+    "WMEM"  -> writeMemoryOrRegister valA valB  >> adv op >> return Nothing
     "JT"    -> (if valA /= 0 then jmp valB else adv op) >> return Nothing
     "JF"    -> (if valA == 0 then jmp valB else adv op) >> return Nothing
     "OUT"   -> adv op >> return ( Just ( chr valA ) )
     "NOP"   -> adv op >> return Nothing
+    "CALL"  -> pushStack (ip + numArgs op + 1) >> jmp valA >> return Nothing
+    "RET"   -> popStack >>= jmp >> return Nothing
     _       -> halt >> return Nothing
   where halt  = modify (\s -> s { vmHalt = True })
         jmp i = modify (\s -> s { vmIP = i })

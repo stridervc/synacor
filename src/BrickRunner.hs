@@ -21,23 +21,32 @@ data UIState = UIState
 registersBrick :: UIState -> Widget n
 registersBrick state = vBox [ reg 0, reg 1, reg 2, reg 3, reg 4, reg 5, reg 6, reg 7, regip, reghlt ]
   where vmstate = vmState state
-        reg r   = str $ "R" <> show r <> "   = " <> show ( vmRegisters vmstate !! r)
-        regip   = str $ "IP   = " <> show ( vmIP vmstate )
+        reg r   = str $ "R" <> show r <> "   = " <> hex ( vmRegisters vmstate !! r)
+        regip   = str $ "IP   = " <> hex ( vmIP vmstate )
         reghlt  = str $ "HALT = " <> show ( vmHalt vmstate )
 
+opCodeRow :: UIState -> (Bool, Int) -> Widget n
+opCodeRow state (hi, i) = padRight (Pad (27-(length line + 2))) $ str line
+  where vmstate   = vmState state
+        op        = vmMemory vmstate !! i
+        argA      = vmMemory vmstate !! (i + 1)
+        argB      = vmMemory vmstate !! (i + 2)
+        argC      = vmMemory vmstate !! (i + 3)
+        leftpad   = padLeft (Pad 1)
+        addr      = hex i
+        hi'       = if hi then ">" else " "
+        opstr     = decodeOpCode op <> replicate (4 - length (decodeOpCode op)) ' '
+        show' n   = if n >= 32768 then "R" <> show (n-32768) else hex n
+        numargs   = numArgs op
+        argStrs   = map show' $ take numargs [ argA, argB, argC ]
+        line      = unwords $ addr : hi' : opstr : argStrs
+
 opCodeBrick :: UIState -> Widget n
-opCodeBrick state = str $ " > " <> opStr <> " " <> opArgsStr
+opCodeBrick state = vBox $ take 10 $ zipWith (curry (opCodeRow state)) (True : repeat False) ips
   where vmstate   = vmState state
         ip        = vmIP vmstate
-        opcode    = vmMemory vmstate !! ip
-        argA      = vmMemory vmstate !! (ip + 1)
-        argB      = vmMemory vmstate !! (ip + 2)
-        argC      = vmMemory vmstate !! (ip + 3)
-        args      = [ argA, argB, argC ]
-        opStr     = decodeOpCode opcode
-        numargs   = numArgs opcode
-        show' i   = if i >= 32768 then "R" <> show (i-32768) else show i
-        opArgsStr = unwords $ map show' $ take numargs args
+        opcode i  = vmMemory vmstate !! i
+        ips       = iterate (\i -> i + numArgs (opcode i) + 1) ip
 
 drawUI :: UIState -> [ Widget n ]
 drawUI state = [ joinBorders ( opcodes <+> output' <+> registers ) ]
