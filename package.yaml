@@ -29,6 +29,7 @@ library:
   - ansi-terminal
   - brick
   - vty
+  - extra
 
 executables:
   synacor:

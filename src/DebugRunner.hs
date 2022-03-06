@@ -6,6 +6,7 @@ import VMState
 import System.IO (hFlush, stdout)
 import System.Console.ANSI
 import Control.Monad (when)
+import Control.Monad.Extra (whenJust)
 
 prompt :: IO (Int, Int)
 prompt = do
@@ -29,6 +30,7 @@ debugRun state = do
     "quit"  -> return state
     "run"   -> runVM state
     ""      -> do
-      state' <- stepVM state
+      let (out', state') = stepVM state
+      whenJust out' putChar
       debugRun state'
     _       -> debugRun state

@@ -36,6 +36,7 @@ library
       ansi-terminal
     , base >=4.7 && <5
     , brick
+    , extra
     , mtl
     , vty
   default-language: Haskell2010

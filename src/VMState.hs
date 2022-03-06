@@ -11,11 +11,12 @@ module VMState
 import Data.Char (chr, ord)
 import Data.Bits (shiftL)
 import Control.Monad.State
+import Control.Monad.Extra (whenJust)
 
 type Register   = Int
 type Operator   = Int
 
-type VMUpdater = StateT VMState IO
+type VMUpdater = State VMState
 
 data VMState = VMState
   { vmMemory    :: [Int]      -- ^ 32768 Integers
@@ -97,7 +98,7 @@ decodeOpCode 19 = "OUT"
 decodeOpCode 21 = "NOP"
 decodeOpCode n  = error $ "Unknown opcode " <> show n
 
-stepVM' :: VMUpdater ()
+stepVM' :: VMUpdater (Maybe Char)
 stepVM' = do
   ip    <- readIP
   op    <- readMemory ip
@@ -109,22 +110,24 @@ stepVM' = do
   valC  <- argValue 2
 
   case decodeOpCode op of
-    "HALT"  -> halt
-    "JMP"   -> modify (\s -> s { vmIP = valA })
-    "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> incIP 4
-    "OUT"   -> liftIO (putChar $ chr valA) >> incIP 2
-    "NOP"   -> incIP 1
-    _       -> halt
+    "HALT"  -> halt >> return Nothing
+    "JMP"   -> modify (\s -> s { vmIP = valA }) >> return Nothing
+    "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> incIP 4 >> return Nothing
+    "OUT"   -> incIP 2 >> return ( Just ( chr valA ) )
+    "NOP"   -> incIP 1 >> return Nothing
+    _       -> halt >> return Nothing
   where halt  = modify (\s -> s { vmHalt = True })
 
-stepVM :: VMState -> IO VMState
-stepVM = execStateT stepVM'
+stepVM :: VMState -> (Maybe Char, VMState)
+stepVM = runState stepVM'
 
 runVM :: VMState -> IO VMState
 runVM state = do
-  state' <- stepVM state
+  let (out', state') = stepVM state
+  whenJust out' putChar
   if vmHalt state' then return state' else runVM state'
 
+-- TODO this should be removed from here
 dumpRegisters :: VMState -> IO ()
 dumpRegisters state = do
   putStrLn $ "IP = " <> show (vmIP state)
