@@ -95,6 +95,17 @@ incIP n = do
   ip <- readIP
   modify (\s -> s { vmIP = ip + n })
 
+pushStack :: Int -> VMUpdater ()
+pushStack v = do
+  stack <- gets vmStack
+  modify (\s -> s { vmStack = v : stack })
+
+popStack :: VMUpdater Int
+popStack = do
+  stack <- gets vmStack
+  modify (\s -> s { vmStack = tail stack })
+  return $ head stack
+
 stepVM' :: VMUpdater (Maybe Char)
 stepVM' = do
   ip    <- readIP
@@ -109,7 +120,10 @@ stepVM' = do
   case decodeOpCode op of
     "HALT"  -> halt >> return Nothing
     "SET"   -> writeMemoryOrRegister argA valB >> adv op >> return Nothing
+    "PUSH"  -> pushStack valA >> adv op >> return Nothing
+    "POP"   -> popStack >>= writeMemoryOrRegister argA >> adv op >> return Nothing
     "EQ"    -> writeMemoryOrRegister argA (if valB == valC then 1 else 0) >> adv op >> return Nothing
+    "GT"    -> writeMemoryOrRegister argA (if valB > valC then 1 else 0) >> adv op >> return Nothing
     "JMP"   -> jmp valA >> return Nothing
     "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> adv op >> return Nothing
     "JT"    -> (if valA /= 0 then jmp valB else adv op) >> return Nothing
