@@ -62,12 +62,16 @@ stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ vmStack $ vmStat
 hotkeysBrick :: Widget n
 hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "F5 - Step", "F10 - Quit" ]
 
+inputBrick :: UIState -> Widget n
+inputBrick = str . vmInBuffer . vmState
+
 drawUI :: UIState -> [ Widget n ]
-drawUI state = [ joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> hotkeys) ]
+drawUI state = [ joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> inbuff <=> hotkeys) ]
   where output'   = B.border $ padRight Max $ strWrap $ vmOutput $ vmState state
         registers = B.border $ registersBrick state
         opcodes   = B.border $ opCodeBrick state
         stack     = B.border $ stackBrick state
+        inbuff    = B.border $ inputBrick state
         hotkeys   = B.border hotkeysBrick
 
 eventHandler :: UIState -> BrickEvent n UIEvent -> EventM n (Next UIState)
@@ -85,9 +89,13 @@ eventHandler state (VtyEvent e) = case e of
   V.EvKey (V.KFun 3) []   -> do
                               vms' <- liftIO (loadVM "vm.state")
                               continue $ state { vmState = vms' }
+  V.EvKey (V.KChar c) []  -> continue $ state { vmState = vms { vmInBuffer = inb <> [c] } }
+  V.EvKey V.KEnter []     -> continue $ state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
   _                       -> continue state
   where vmstate'  = stepVM $ vmState state
         state'    = state { vmState = vmstate' }
+        vms       = vmState state
+        inb       = vmInBuffer vms
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap

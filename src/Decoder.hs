@@ -25,6 +25,7 @@ decodeOpCode 16 = "WMEM"
 decodeOpCode 17 = "CALL"
 decodeOpCode 18 = "RET"
 decodeOpCode 19 = "OUT"
+decodeOpCode 20 = "IN"
 decodeOpCode 21 = "NOP"
 decodeOpCode n  = show n
 
@@ -49,6 +50,7 @@ numArgs 16  = 2
 numArgs 17  = 1
 numArgs 18  = 0
 numArgs 19  = 1
+numArgs 20  = 1
 numArgs 21  = 0
 numArgs _   = 0
 

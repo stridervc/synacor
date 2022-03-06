@@ -16,6 +16,7 @@ import Data.Bits
 import Data.Char (chr, ord)
 import Control.Monad.State
 import Control.Monad.Extra (whenJust)
+import Control.Monad (when)
 import System.IO (openBinaryFile, hGetContents, IOMode(..))
 
 type Register   = Int
@@ -30,6 +31,7 @@ data VMState = VMState
   , vmIP        :: Int        -- ^ Instruction Pointer
   , vmHalt      :: Bool       -- ^ Catch fire?
   , vmOutput    :: String     -- ^ VM's output
+  , vmInBuffer  :: String     -- ^ Input buffer
   } deriving (Eq, Show, Read)
 
 newVMState :: VMState
@@ -40,6 +42,7 @@ newVMState = VMState
   , vmIP        = 0
   , vmHalt      = False
   , vmOutput    = ""
+  , vmInBuffer  = ""
   }
 
 newVMFromInts :: [Int] -> VMState
@@ -119,6 +122,7 @@ stepVM' = do
   valA  <- argValue 0
   valB  <- argValue 1
   valC  <- argValue 2
+  inb   <- gets vmInBuffer
 
   case decodeOpCode op of
     "HALT"  -> halt
@@ -136,12 +140,16 @@ stepVM' = do
     "NOT"   -> writeMemoryOrRegister argA (complement valB .&. 32767) >> adv op
     "RMEM"  -> readMemory valB >>= writeMemoryOrRegister argA >> adv op
     "WMEM"  -> writeMemoryOrRegister valA valB  >> adv op
+    "CALL"  -> pushStack (ip + numArgs op + 1) >> jmp valA
+    "RET"   -> popStack >>= jmp
     "JT"    -> (if valA /= 0 then jmp valB else adv op)
     "JF"    -> (if valA == 0 then jmp valB else adv op)
     "OUT"   -> adv op >> modify (\s -> s { vmOutput = vmOutput s <> [chr valA] })
+    "IN"    -> when (inb /= "") $ do
+                writeMemoryOrRegister argA $ ord $ head inb
+                modify (\s -> s { vmInBuffer = tail inb })
+                adv op
     "NOP"   -> adv op
-    "CALL"  -> pushStack (ip + numArgs op + 1) >> jmp valA
-    "RET"   -> popStack >>= jmp
     _       -> halt
   where halt  = modify (\s -> s { vmHalt = True })
         jmp i = modify (\s -> s { vmIP = i })
