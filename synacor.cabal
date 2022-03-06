@@ -37,6 +37,7 @@ library
     , base >=4.7 && <5
     , brick
     , mtl
+    , vty
   default-language: Haskell2010
 
 executable synacor
