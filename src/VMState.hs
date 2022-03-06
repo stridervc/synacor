@@ -1,3 +1,5 @@
+{-# Language FlexibleContexts #-}
+
 module VMState
   ( VMState (..)
   , newVMState
@@ -13,6 +15,7 @@ import Data.Char (chr, ord)
 import Data.Bits (shiftL)
 import Control.Monad.State
 import Control.Monad.Extra (whenJust)
+import System.IO (openBinaryFile, hGetContents, IOMode(..))
 
 type Register   = Int
 type Operator   = Int
@@ -47,7 +50,8 @@ charPairsToInts _         = error "Invalid arguments to charPairsToInts"
 
 newVMFromFile :: FilePath -> IO VMState
 newVMFromFile f = do
-  contents <- readFile f
+  h <- openBinaryFile f ReadMode
+  contents <- hGetContents h
   return $ newVMFromInts $ charPairsToInts contents
 
 readMemory :: Int -> VMUpdater Int
@@ -104,12 +108,18 @@ stepVM' = do
 
   case decodeOpCode op of
     "HALT"  -> halt >> return Nothing
-    "JMP"   -> modify (\s -> s { vmIP = valA }) >> return Nothing
-    "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> incIP 4 >> return Nothing
-    "OUT"   -> incIP 2 >> return ( Just ( chr valA ) )
-    "NOP"   -> incIP 1 >> return Nothing
+    "SET"   -> writeMemoryOrRegister argA valB >> adv op >> return Nothing
+    "EQ"    -> writeMemoryOrRegister argA (if valB == valC then 1 else 0) >> adv op >> return Nothing
+    "JMP"   -> jmp valA >> return Nothing
+    "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> adv op >> return Nothing
+    "JT"    -> (if valA /= 0 then jmp valB else adv op) >> return Nothing
+    "JF"    -> (if valA == 0 then jmp valB else adv op) >> return Nothing
+    "OUT"   -> adv op >> return ( Just ( chr valA ) )
+    "NOP"   -> adv op >> return Nothing
     _       -> halt >> return Nothing
   where halt  = modify (\s -> s { vmHalt = True })
+        jmp i = modify (\s -> s { vmIP = i })
+        adv n = incIP $ numArgs n + 1
 
 stepVM :: VMState -> (Maybe Char, VMState)
 stepVM = runState stepVM'
