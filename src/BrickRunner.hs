@@ -48,11 +48,16 @@ opCodeBrick state = vBox $ take 10 $ zipWith (curry (opCodeRow state)) (True : r
         opcode i  = vmMemory vmstate !! i
         ips       = iterate (\i -> i + numArgs (opcode i) + 1) ip
 
+stackBrick :: UIState -> Widget n
+stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ vmStack $ vmState state
+  where show' (i, v)  = hex i <> " : " <> hex v
+
 drawUI :: UIState -> [ Widget n ]
-drawUI state = [ joinBorders ( opcodes <+> output' <+> registers ) ]
+drawUI state = [ joinBorders ( opcodes <+> output' <+> (registers <=> stack) ) ]
   where output'   = B.border $ padRight Max $ str $ output state
         registers = B.border $ registersBrick state
         opcodes   = B.border $ opCodeBrick state
+        stack     = B.border $ stackBrick state
 
 eventHandler :: UIState -> BrickEvent n e -> EventM n (Next UIState)
 eventHandler state (VtyEvent e) = case e of
