@@ -7,7 +7,8 @@ module VMState
   , newVMFromFile
   , stepVM
   , runVM
-  , dumpRegisters
+  , saveVM
+  , loadVM
   ) where
 
 import Decoder
@@ -28,7 +29,8 @@ data VMState = VMState
   , vmStack     :: [Int]      -- ^ Unbounded stack
   , vmIP        :: Int        -- ^ Instruction Pointer
   , vmHalt      :: Bool       -- ^ Catch fire?
-  } deriving (Eq, Show)
+  , vmOutput    :: String     -- ^ VM's output
+  } deriving (Eq, Show, Read)
 
 newVMState :: VMState
 newVMState = VMState
@@ -37,6 +39,7 @@ newVMState = VMState
   , vmStack     = []
   , vmIP        = 0
   , vmHalt      = False
+  , vmOutput    = ""
   }
 
 newVMFromInts :: [Int] -> VMState
@@ -106,8 +109,7 @@ popStack = do
   modify (\s -> s { vmStack = tail stack })
   return $ head stack
 
--- TODO set breakpoint 06e2
-stepVM' :: VMUpdater (Maybe Char)
+stepVM' :: VMUpdater ()
 stepVM' = do
   ip    <- readIP
   op    <- readMemory ip
@@ -119,51 +121,45 @@ stepVM' = do
   valC  <- argValue 2
 
   case decodeOpCode op of
-    "HALT"  -> halt >> return Nothing
-    "SET"   -> writeMemoryOrRegister argA valB >> adv op >> return Nothing
-    "PUSH"  -> pushStack valA >> adv op >> return Nothing
-    "POP"   -> popStack >>= writeMemoryOrRegister argA >> adv op >> return Nothing
-    "EQ"    -> writeMemoryOrRegister argA (if valB == valC then 1 else 0) >> adv op >> return Nothing
-    "GT"    -> writeMemoryOrRegister argA (if valB > valC then 1 else 0) >> adv op >> return Nothing
-    "JMP"   -> jmp valA >> return Nothing
-    "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> adv op >> return Nothing
-    "MUL"   -> writeMemoryOrRegister argA ((valB * valC) `mod` 32768) >> adv op >> return Nothing
-    "MOD"   -> writeMemoryOrRegister argA (valB `mod` valC) >> adv op >> return Nothing
-    "AND"   -> writeMemoryOrRegister argA (valB .&. valC) >> adv op >> return Nothing
-    "OR"    -> writeMemoryOrRegister argA (valB .|. valC) >> adv op >> return Nothing
-    "NOT"   -> writeMemoryOrRegister argA (complement valB .&. 32767) >> adv op >> return Nothing
-    "RMEM"  -> readMemory valB >>= writeMemoryOrRegister argA >> adv op >> return Nothing
-    "WMEM"  -> writeMemoryOrRegister valA valB  >> adv op >> return Nothing
-    "JT"    -> (if valA /= 0 then jmp valB else adv op) >> return Nothing
-    "JF"    -> (if valA == 0 then jmp valB else adv op) >> return Nothing
-    "OUT"   -> adv op >> return ( Just ( chr valA ) )
-    "NOP"   -> adv op >> return Nothing
-    "CALL"  -> pushStack (ip + numArgs op + 1) >> jmp valA >> return Nothing
-    "RET"   -> popStack >>= jmp >> return Nothing
-    _       -> halt >> return Nothing
+    "HALT"  -> halt
+    "SET"   -> writeMemoryOrRegister argA valB >> adv op
+    "PUSH"  -> pushStack valA >> adv op
+    "POP"   -> popStack >>= writeMemoryOrRegister argA >> adv op
+    "EQ"    -> writeMemoryOrRegister argA (if valB == valC then 1 else 0) >> adv op
+    "GT"    -> writeMemoryOrRegister argA (if valB > valC then 1 else 0) >> adv op
+    "JMP"   -> jmp valA
+    "ADD"   -> writeMemoryOrRegister argA ((valB + valC) `mod` 32768) >> adv op
+    "MUL"   -> writeMemoryOrRegister argA ((valB * valC) `mod` 32768) >> adv op
+    "MOD"   -> writeMemoryOrRegister argA (valB `mod` valC) >> adv op
+    "AND"   -> writeMemoryOrRegister argA (valB .&. valC) >> adv op
+    "OR"    -> writeMemoryOrRegister argA (valB .|. valC) >> adv op
+    "NOT"   -> writeMemoryOrRegister argA (complement valB .&. 32767) >> adv op
+    "RMEM"  -> readMemory valB >>= writeMemoryOrRegister argA >> adv op
+    "WMEM"  -> writeMemoryOrRegister valA valB  >> adv op
+    "JT"    -> (if valA /= 0 then jmp valB else adv op)
+    "JF"    -> (if valA == 0 then jmp valB else adv op)
+    "OUT"   -> adv op >> modify (\s -> s { vmOutput = vmOutput s <> [chr valA] })
+    "NOP"   -> adv op
+    "CALL"  -> pushStack (ip + numArgs op + 1) >> jmp valA
+    "RET"   -> popStack >>= jmp
+    _       -> halt
   where halt  = modify (\s -> s { vmHalt = True })
         jmp i = modify (\s -> s { vmIP = i })
         adv n = incIP $ numArgs n + 1
 
-stepVM :: VMState -> (Maybe Char, VMState)
-stepVM = runState stepVM'
+stepVM :: VMState -> VMState
+stepVM = execState stepVM'
 
-runVM :: VMState -> IO VMState
-runVM state = do
-  let (out', state') = stepVM state
-  whenJust out' putChar
-  if vmHalt state' then return state' else runVM state'
+runVM :: VMState -> VMState
+runVM state
+  | vmHalt state' = state'
+  | otherwise     = runVM state'
+  where state' = stepVM state
 
--- TODO this should be removed from here
-dumpRegisters :: VMState -> IO ()
-dumpRegisters state = do
-  putStrLn $ "IP = " <> show (vmIP state)
-  putStrLn $ "R0 = " <> show (head $ vmRegisters state)
-  putStrLn $ "R1 = " <> show (vmRegisters state !! 1)
-  putStrLn $ "R2 = " <> show (vmRegisters state !! 2)
-  putStrLn $ "R3 = " <> show (vmRegisters state !! 3)
-  putStrLn $ "R4 = " <> show (vmRegisters state !! 4)
-  putStrLn $ "R5 = " <> show (vmRegisters state !! 5)
-  putStrLn $ "R6 = " <> show (vmRegisters state !! 6)
-  putStrLn $ "R7 = " <> show (vmRegisters state !! 7)
-  putStrLn $ "HALT = " <> show (vmHalt state)
+saveVM :: VMState -> FilePath -> IO ()
+saveVM state file = writeFile file $ show state
+
+loadVM :: FilePath -> IO VMState
+loadVM file = do
+  contents <- readFile file
+  return $ read contents

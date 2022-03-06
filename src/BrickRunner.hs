@@ -10,6 +10,7 @@ import Brick.BChan
 import Brick.Widgets.Core
 import Data.Maybe (maybeToList)
 import Control.Monad (void, forever)
+import Control.Monad.IO.Class (liftIO)
 import Control.Concurrent (threadDelay, forkIO)
 import Data.List (intercalate)
 import qualified Brick.AttrMap as A
@@ -21,7 +22,6 @@ data UIEvent  = StepEvent deriving (Eq, Show)
 
 data UIState = UIState
   { vmState :: VMState
-  , output  :: String
   , running :: Bool
   } deriving (Eq, Show)
 
@@ -64,7 +64,7 @@ hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "
 
 drawUI :: UIState -> [ Widget n ]
 drawUI state = [ joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> hotkeys) ]
-  where output'   = B.border $ padRight Max $ str $ output state
+  where output'   = B.border $ padRight Max $ strWrap $ vmOutput $ vmState state
         registers = B.border $ registersBrick state
         opcodes   = B.border $ opCodeBrick state
         stack     = B.border $ stackBrick state
@@ -74,16 +74,20 @@ eventHandler :: UIState -> BrickEvent n UIEvent -> EventM n (Next UIState)
 eventHandler state (AppEvent StepEvent)
   | running'  = continue state'
   | otherwise = continue state
-  where (out', vmstate')  = stepVM $ vmState state
-        state'            = state { vmState = vmstate', output = output state <> maybeToList out' }
-        running'          = running state
+  where vmstate'  = stepVM $ vmState state
+        state'    = state { vmState = vmstate' }
+        running'  = running state
 eventHandler state (VtyEvent e) = case e of
   V.EvKey (V.KFun 10) []  -> halt state
   V.EvKey (V.KFun 5) []   -> continue state'
   V.EvKey (V.KFun 4) []   -> continue state { running = not $ running state }
+  V.EvKey (V.KFun 2) []   -> liftIO (saveVM (vmState state) "vm.state") >> continue state
+  V.EvKey (V.KFun 3) []   -> do
+                              vms' <- liftIO (loadVM "vm.state")
+                              continue $ state { vmState = vms' }
   _                       -> continue state
-  where (out', vmstate')  = stepVM $ vmState state
-        state'            = state { vmState = vmstate', output = output state <> maybeToList out' }
+  where vmstate'  = stepVM $ vmState state
+        state'    = state { vmState = vmstate' }
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap
@@ -102,11 +106,10 @@ brickRun state = do
   chan <- newBChan 10
   void $ forkIO $ forever $ do
     writeBChan chan StepEvent
-    threadDelay 100
+    threadDelay 1000
 
   let buildVty = V.mkVty V.defaultConfig
   initialVty <- buildVty
 
-  -- uistate' <- defaultMain app $ UIState { vmState = state, output = "", running = False }
-  uistate' <- customMain initialVty buildVty (Just chan) app $ UIState { vmState = state, output = "", running = False }
+  uistate' <- customMain initialVty buildVty (Just chan) app $ UIState { vmState = state, running = False }
   return $ vmState uistate'
