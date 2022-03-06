@@ -8,6 +8,7 @@ module VMState
   , dumpRegisters
   ) where
 
+import Decoder
 import Data.Char (chr, ord)
 import Data.Bits (shiftL)
 import Control.Monad.State
@@ -89,14 +90,6 @@ incIP :: Int -> VMUpdater ()
 incIP n = do
   ip <- readIP
   modify (\s -> s { vmIP = ip + n })
-
-decodeOpCode :: Int -> String
-decodeOpCode 0  = "HALT"
-decodeOpCode 6  = "JMP"
-decodeOpCode 9  = "ADD"
-decodeOpCode 19 = "OUT"
-decodeOpCode 21 = "NOP"
-decodeOpCode n  = error $ "Unknown opcode " <> show n
 
 stepVM' :: VMUpdater (Maybe Char)
 stepVM' = do
