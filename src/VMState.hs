@@ -167,4 +167,3 @@ dumpRegisters state = do
   putStrLn $ "R6 = " <> show (vmRegisters state !! 6)
   putStrLn $ "R7 = " <> show (vmRegisters state !! 7)
   putStrLn $ "HALT = " <> show (vmHalt state)
-

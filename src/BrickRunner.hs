@@ -6,16 +6,23 @@ import VMState
 import Decoder
 import Brick.Main
 import Brick.Types
+import Brick.BChan
 import Brick.Widgets.Core
 import Data.Maybe (maybeToList)
+import Control.Monad (void, forever)
+import Control.Concurrent (threadDelay, forkIO)
+import Data.List (intercalate)
 import qualified Brick.AttrMap as A
 import qualified Graphics.Vty as V
 import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.Border.Style as Bs
 
+data UIEvent  = StepEvent deriving (Eq, Show)
+
 data UIState = UIState
   { vmState :: VMState
   , output  :: String
+  , running :: Bool
   } deriving (Eq, Show)
 
 registersBrick :: UIState -> Widget n
@@ -52,26 +59,37 @@ stackBrick :: UIState -> Widget n
 stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ vmStack $ vmState state
   where show' (i, v)  = hex i <> " : " <> hex v
 
+hotkeysBrick :: Widget n
+hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "F5 - Step", "F10 - Quit" ]
+
 drawUI :: UIState -> [ Widget n ]
-drawUI state = [ joinBorders ( opcodes <+> output' <+> (registers <=> stack) ) ]
+drawUI state = [ joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> hotkeys) ]
   where output'   = B.border $ padRight Max $ str $ output state
         registers = B.border $ registersBrick state
         opcodes   = B.border $ opCodeBrick state
         stack     = B.border $ stackBrick state
+        hotkeys   = B.border hotkeysBrick
 
-eventHandler :: UIState -> BrickEvent n e -> EventM n (Next UIState)
-eventHandler state (VtyEvent e) = case e of
-  V.EvKey (V.KChar 'q') []  -> halt state
-  V.EvKey (V.KChar 's') []  -> continue state'
-  _                         -> continue state
+eventHandler :: UIState -> BrickEvent n UIEvent -> EventM n (Next UIState)
+eventHandler state (AppEvent StepEvent)
+  | running'  = continue state'
+  | otherwise = continue state
   where (out', vmstate')  = stepVM $ vmState state
-        state'            = UIState { vmState = vmstate', output = output state <> maybeToList out' }
+        state'            = state { vmState = vmstate', output = output state <> maybeToList out' }
+        running'          = running state
+eventHandler state (VtyEvent e) = case e of
+  V.EvKey (V.KFun 10) []  -> halt state
+  V.EvKey (V.KFun 5) []   -> continue state'
+  V.EvKey (V.KFun 4) []   -> continue state { running = not $ running state }
+  _                       -> continue state
+  where (out', vmstate')  = stepVM $ vmState state
+        state'            = state { vmState = vmstate', output = output state <> maybeToList out' }
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap
 attrMap s = A.attrMap V.defAttr []
 
-app :: App UIState e ()
+app :: App UIState UIEvent ()
 app = App { appDraw         = drawUI
           , appChooseCursor = \_ _ -> Nothing
           , appHandleEvent  = eventHandler
@@ -81,5 +99,14 @@ app = App { appDraw         = drawUI
 
 brickRun :: VMState -> IO VMState
 brickRun state = do
-  uistate' <- defaultMain app $ UIState { vmState = state, output = "" }
+  chan <- newBChan 10
+  void $ forkIO $ forever $ do
+    writeBChan chan StepEvent
+    threadDelay 100
+
+  let buildVty = V.mkVty V.defaultConfig
+  initialVty <- buildVty
+
+  -- uistate' <- defaultMain app $ UIState { vmState = state, output = "", running = False }
+  uistate' <- customMain initialVty buildVty (Just chan) app $ UIState { vmState = state, output = "", running = False }
   return $ vmState uistate'
