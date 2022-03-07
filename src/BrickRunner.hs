@@ -19,6 +19,7 @@ import qualified Brick.Widgets.Border as B
 import qualified Brick.Widgets.Border.Style as Bs
 
 data UIEvent  = StepEvent deriving (Eq, Show)
+data UINames  = OutputView deriving (Eq, Show, Ord)
 
 data UIState = UIState
   { vmState :: VMState
@@ -56,7 +57,7 @@ opCodeBrick state = vBox $ take 10 $ zipWith (curry (opCodeRow state)) (True : r
         ips       = iterate (\i -> i + numArgs (opcode i) + 1) ip
 
 stackBrick :: UIState -> Widget n
-stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ vmStack $ vmState state
+stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ take 20 $ vmStack $ vmState state
   where show' (i, v)  = hex i <> " : " <> hex v
 
 hotkeysBrick :: Widget n
@@ -65,22 +66,23 @@ hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "
 inputBrick :: UIState -> Widget n
 inputBrick = str . vmInBuffer . vmState
 
-drawUI :: UIState -> [ Widget n ]
-drawUI state = [ joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> inbuff <=> hotkeys) ]
-  where output'   = B.border $ padRight Max $ strWrap $ vmOutput $ vmState state
+drawUI :: UIState -> [ Widget UINames ]
+drawUI state = [ joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> hotkeys) ]
+  where output'   = B.border $ viewport OutputView Vertical $ padRight Max $ strWrap $ vmOutput $ vmState state
         registers = B.border $ registersBrick state
         opcodes   = B.border $ opCodeBrick state
         stack     = B.border $ stackBrick state
         inbuff    = B.border $ inputBrick state
         hotkeys   = B.border hotkeysBrick
 
-eventHandler :: UIState -> BrickEvent n UIEvent -> EventM n (Next UIState)
+eventHandler :: UIState -> BrickEvent UINames UIEvent -> EventM UINames (Next UIState)
 eventHandler state (AppEvent StepEvent)
-  | running'  = continue state'
-  | otherwise = continue state
+  | running'  = scroll >> continue state'
+  | otherwise = scroll >> continue state
   where vmstate'  = stepVM $ vmState state
         state'    = state { vmState = vmstate' }
         running'  = running state
+        scroll    = vScrollToEnd (viewportScroll OutputView)
 eventHandler state (VtyEvent e) = case e of
   V.EvKey (V.KFun 10) []  -> halt state
   V.EvKey (V.KFun 5) []   -> continue state'
@@ -89,8 +91,8 @@ eventHandler state (VtyEvent e) = case e of
   V.EvKey (V.KFun 3) []   -> do
                               vms' <- liftIO (loadVM "vm.state")
                               continue $ state { vmState = vms' }
-  V.EvKey (V.KChar c) []  -> continue $ state { vmState = vms { vmInBuffer = inb <> [c] } }
-  V.EvKey V.KEnter []     -> continue $ state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
+  V.EvKey (V.KChar c) []  -> continue state { vmState = vms { vmInBuffer = inb <> [c] } }
+  V.EvKey V.KEnter []     -> continue state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
   _                       -> continue state
   where vmstate'  = stepVM $ vmState state
         state'    = state { vmState = vmstate' }
@@ -101,7 +103,7 @@ eventHandler state _ = continue state
 attrMap :: UIState -> A.AttrMap
 attrMap s = A.attrMap V.defAttr []
 
-app :: App UIState UIEvent ()
+app :: App UIState UIEvent UINames
 app = App { appDraw         = drawUI
           , appChooseCursor = \_ _ -> Nothing
           , appHandleEvent  = eventHandler
