@@ -1,3 +1,5 @@
+{-# Language OverloadedStrings #-}
+
 module BrickRunner
   ( brickRun
   ) where
@@ -7,6 +9,7 @@ import Decoder
 import Brick.Main
 import Brick.Types
 import Brick.BChan
+import Brick.Util (on)
 import Brick.Widgets.Core
 import Brick.Widgets.Table
 import Brick.Widgets.Center
@@ -23,7 +26,7 @@ import qualified Brick.Widgets.Border.Style as Bs
 
 data UIEvent  = StepEvent deriving (Eq, Show)
 data UINames  = OutputView deriving (Eq, Show, Ord)
-data UIMode   = ModeMain | ModeMemory deriving (Eq, Show)
+data UIMode   = ModeMain | ModeMemory | ModeMemDiff deriving (Eq, Show)
 
 data UIState = UIState
   { vmState   :: VMState
@@ -32,6 +35,7 @@ data UIState = UIState
   , memDPage  :: Int      -- ^ Mem dump page
   , memDCols  :: Int      -- ^ Mem dump columns
   , memDRows  :: Int      -- ^ Mem dump rows
+  , memDSave  :: [Int]    -- ^ Mem dump save, 32768 Integers
   } deriving (Eq, Show)
 
 registersBrick :: UIState -> Widget n
@@ -69,7 +73,7 @@ stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ take 20 $ vmStac
   where show' (i, v)  = hex i <> " : " <> hex v
 
 hotkeysBrick :: Widget n
-hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "F5 - Step", "F6 - Memory", "F10 - Quit" ]
+hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "F5 - Step", "F6 - Memory", "F7 - Mem Save", "F8 - Mem Diff", "F10 - Quit" ]
 
 inputBrick :: UIState -> Widget n
 inputBrick = str . vmInBuffer . vmState
@@ -91,12 +95,22 @@ memoryBrick state = centerLayer $ B.borderWithLabel (str "Memory") content
                   | i >= 127  = "."
                   | otherwise = [chr i]
 
+memoryDiffBrick :: UIState -> Widget n
+memoryDiffBrick state = centerLayer $ B.borderWithLabel (str "Memory Diff") content
+  where vms                   = vmState state
+        mem                   = vmMemory vms
+        saved                 = memDSave state
+        diff                  = take 32 [ ( i, saved !! i, mem !! i) | i <- [0..32767], saved !! i /= mem !! i ]
+        diffrow (i, old, new) = str $ hex i <> " | " <> hex old <> " -> " <> hex new
+        content               = vBox $ map diffrow diff
+
 drawUI :: UIState -> [ Widget UINames ]
 drawUI state
-  | memui     = [ memoryBrick state, mainlayout ]
+  | memdiffui = [ memoryDiffBrick state, withAttr "faded" mainlayout ]
+  | memui     = [ memoryBrick state, withAttr "faded" mainlayout ]
   | otherwise = [ mainlayout ]
-  where mainui      = uiMode state == ModeMain
-        memui       = uiMode state == ModeMemory
+  where memui       = uiMode state == ModeMemory
+        memdiffui   = uiMode state == ModeMemDiff
         output'     = B.border $ viewport OutputView Vertical $ padRight Max $ strWrap $ vmOutput $ vmState state
         registers   = B.border $ registersBrick state
         opcodes     = B.border $ opCodeBrick state
@@ -114,13 +128,18 @@ eventHandler state (AppEvent StepEvent)
         running'  = running state
         scroll    = vScrollToEnd (viewportScroll OutputView)
 eventHandler state (VtyEvent e)
+  | memdiffui = case e of
+    V.EvKey V.KEsc []       -> continue state { uiMode = ModeMain }
+    _                       -> continue state
   | memui     = case e of
     V.EvKey V.KEsc []       -> continue state { uiMode = ModeMain }
-    V.EvKey V.KPageDown []  -> continue state { memDPage = if page*cols*rows < 32765-cols*rows then page + 1 else page }
+    V.EvKey V.KPageDown []  -> continue state { memDPage = if page*cols*rows < 32768-cols*rows then page + 1 else page }
     V.EvKey V.KPageUp []    -> continue state { memDPage = if page > 0 then page - 1 else page }
     _                       -> continue state
   | otherwise = case e of
     V.EvKey (V.KFun 10) []  -> halt state
+    V.EvKey (V.KFun 8) []   -> continue state { uiMode = ModeMemDiff, running = False }
+    V.EvKey (V.KFun 7) []   -> continue state { memDSave = vmMemory vms }
     V.EvKey (V.KFun 6) []   -> continue state { uiMode = ModeMemory, running = False }
     V.EvKey (V.KFun 5) []   -> continue state'
     V.EvKey (V.KFun 4) []   -> continue state { running = not $ running state }
@@ -136,13 +155,14 @@ eventHandler state (VtyEvent e)
           vms       = vmState state
           inb       = vmInBuffer vms
           memui     = uiMode state == ModeMemory
+          memdiffui = uiMode state == ModeMemDiff
           page      = memDPage state
           cols      = memDCols state
           rows      = memDRows state
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap
-attrMap s = A.attrMap V.defAttr []
+attrMap s = A.attrMap V.defAttr [ ("faded", V.red `on` V.black) ]
 
 app :: App UIState UIEvent UINames
 app = App { appDraw         = drawUI
@@ -159,6 +179,7 @@ uiState state = UIState { vmState   = state
                         , memDPage  = 0
                         , memDCols  = 16
                         , memDRows  = 32
+                        , memDSave  = replicate 32768 0
                         }
 
 brickRun :: VMState -> IO VMState
