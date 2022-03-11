@@ -10,6 +10,7 @@ import Brick.BChan
 import Brick.Widgets.Core
 import Brick.Widgets.Table
 import Brick.Widgets.Center
+import Data.Char (chr)
 import Data.Maybe (maybeToList)
 import Control.Monad (void, forever)
 import Control.Monad.IO.Class (liftIO)
@@ -25,9 +26,12 @@ data UINames  = OutputView deriving (Eq, Show, Ord)
 data UIMode   = ModeMain | ModeMemory deriving (Eq, Show)
 
 data UIState = UIState
-  { vmState :: VMState
-  , running :: Bool
-  , uiMode  :: UIMode
+  { vmState   :: VMState
+  , running   :: Bool
+  , uiMode    :: UIMode
+  , memDPage  :: Int      -- ^ Mem dump page
+  , memDCols  :: Int      -- ^ Mem dump columns
+  , memDRows  :: Int      -- ^ Mem dump rows
   } deriving (Eq, Show)
 
 registersBrick :: UIState -> Widget n
@@ -72,13 +76,20 @@ inputBrick = str . vmInBuffer . vmState
 
 memoryBrick :: UIState -> Widget n
 memoryBrick state = centerLayer $ B.borderWithLabel (str "Memory") content
-  where cols      = 16
-        content   = vBox $ header : header2 : take 32 (map memrow [0,cols..32751])
-        header    = str $ "     | " <> unwords (map hex (take cols [0..]))
-        header2   = str $ "-----+" <> concat (replicate (cols*5) "-")
+  where cols      = memDCols state
+        rows      = memDRows state
+        page      = memDPage state
+        offs      = page * cols * rows
+        content   = vBox $ header : header2 : take rows (map memrow [offs,offs+cols..32751])
+        header    = str $ "     | " <> unwords (map hex (take cols [0..])) <> " |"
+        header2   = str $ "-----+" <> concat (replicate (cols*5) "-") <> "-+-" <> concat (replicate cols "-")
         vmstate   = vmState state
         readmem i = vmMemory vmstate !! i
-        memrow r  = str $ hex r <> " | " <> unwords (take cols (map (hex . readmem . (+r)) [0..]))
+        memrow r  = let m = take cols (map (readmem . (+r)) [0..]) in
+                      str $ hex r <> " | " <> unwords (map hex m) <> " | " <> concatMap ascii m
+        ascii i   | i <= 32   = "."
+                  | i >= 127  = "."
+                  | otherwise = [chr i]
 
 drawUI :: UIState -> [ Widget UINames ]
 drawUI state
@@ -102,23 +113,32 @@ eventHandler state (AppEvent StepEvent)
         state'    = state { vmState = vmstate' }
         running'  = running state
         scroll    = vScrollToEnd (viewportScroll OutputView)
-eventHandler state (VtyEvent e) = case e of
-  V.EvKey (V.KFun 10) []  -> halt state
-  V.EvKey (V.KFun 7) []   -> continue state { uiMode = ModeMain }
-  V.EvKey (V.KFun 6) []   -> continue state { uiMode = ModeMemory, running = False }
-  V.EvKey (V.KFun 5) []   -> continue state'
-  V.EvKey (V.KFun 4) []   -> continue state { running = not $ running state }
-  V.EvKey (V.KFun 2) []   -> liftIO (saveVM (vmState state) "vm.state") >> continue state
-  V.EvKey (V.KFun 3) []   -> do
-                              vms' <- liftIO (loadVM "vm.state")
-                              continue $ state { vmState = vms' }
-  V.EvKey (V.KChar c) []  -> continue state { vmState = vms { vmInBuffer = inb <> [c] } }
-  V.EvKey V.KEnter []     -> continue state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
-  _                       -> continue state
-  where vmstate'  = stepVM $ vmState state
-        state'    = state { vmState = vmstate' }
-        vms       = vmState state
-        inb       = vmInBuffer vms
+eventHandler state (VtyEvent e)
+  | memui     = case e of
+    V.EvKey V.KEsc []       -> continue state { uiMode = ModeMain }
+    V.EvKey V.KPageDown []  -> continue state { memDPage = if page*cols*rows < 32765-cols*rows then page + 1 else page }
+    V.EvKey V.KPageUp []    -> continue state { memDPage = if page > 0 then page - 1 else page }
+    _                       -> continue state
+  | otherwise = case e of
+    V.EvKey (V.KFun 10) []  -> halt state
+    V.EvKey (V.KFun 6) []   -> continue state { uiMode = ModeMemory, running = False }
+    V.EvKey (V.KFun 5) []   -> continue state'
+    V.EvKey (V.KFun 4) []   -> continue state { running = not $ running state }
+    V.EvKey (V.KFun 2) []   -> liftIO (saveVM (vmState state) "vm.state") >> continue state
+    V.EvKey (V.KFun 3) []   -> do
+                                vms' <- liftIO (loadVM "vm.state")
+                                continue $ state { vmState = vms' }
+    V.EvKey (V.KChar c) []  -> continue state { vmState = vms { vmInBuffer = inb <> [c] } }
+    V.EvKey V.KEnter []     -> continue state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
+    _                       -> continue state
+    where vmstate'  = stepVM $ vmState state
+          state'    = state { vmState = vmstate' }
+          vms       = vmState state
+          inb       = vmInBuffer vms
+          memui     = uiMode state == ModeMemory
+          page      = memDPage state
+          cols      = memDCols state
+          rows      = memDRows state
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap
@@ -133,9 +153,12 @@ app = App { appDraw         = drawUI
           }
 
 uiState :: VMState -> UIState
-uiState state = UIState { vmState = state
-                        , running = False
-                        , uiMode  = ModeMain
+uiState state = UIState { vmState   = state
+                        , running   = False
+                        , uiMode    = ModeMain
+                        , memDPage  = 0
+                        , memDCols  = 16
+                        , memDRows  = 32
                         }
 
 brickRun :: VMState -> IO VMState
