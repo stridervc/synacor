@@ -73,7 +73,7 @@ stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ take 20 $ vmStac
   where show' (i, v)  = hex i <> " : " <> hex v
 
 hotkeysBrick :: Widget n
-hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "F5 - Step", "F6 - Memory", "F7 - Mem Save", "F8 - Mem Diff", "F10 - Quit" ]
+hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "F5 - Step", "F6 - Memory", "F7 - Mem Save", "F8 - Mem Diff", "F9 - Step Over", "F10 - Quit" ]
 
 inputBrick :: UIState -> Widget n
 inputBrick = str . vmInBuffer . vmState
@@ -138,6 +138,7 @@ eventHandler state (VtyEvent e)
     _                       -> continue state
   | otherwise = case e of
     V.EvKey (V.KFun 10) []  -> halt state
+    V.EvKey (V.KFun 9) []   -> continue state { vmState = stepOverVM vms }
     V.EvKey (V.KFun 8) []   -> continue state { uiMode = ModeMemDiff, running = False }
     V.EvKey (V.KFun 7) []   -> continue state { memDSave = vmMemory vms }
     V.EvKey (V.KFun 6) []   -> continue state { uiMode = ModeMemory, running = False }

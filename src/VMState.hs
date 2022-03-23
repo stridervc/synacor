@@ -7,12 +7,14 @@ module VMState
   , newVMFromFile
   , stepVM
   , runVM
+  , stepOverVM
   , saveVM
   , loadVM
   ) where
 
 import Decoder
 import Data.Bits
+import Data.List (nub)
 import Data.Char (chr, ord)
 import Control.Monad.State
 import Control.Monad.Extra (whenJust)
@@ -22,27 +24,31 @@ import System.IO (openBinaryFile, hGetContents, IOMode(..))
 type Register   = Int
 type Operator   = Int
 
+newtype Breakpoint = BPIP Int deriving (Eq, Show, Read)
+
 type VMUpdater = State VMState
 
 data VMState = VMState
-  { vmMemory    :: [Int]      -- ^ 32768 Integers
-  , vmRegisters :: [Register] -- ^ 8 Integers
-  , vmStack     :: [Int]      -- ^ Unbounded stack
-  , vmIP        :: Int        -- ^ Instruction Pointer
-  , vmHalt      :: Bool       -- ^ Catch fire?
-  , vmOutput    :: String     -- ^ VM's output
-  , vmInBuffer  :: String     -- ^ Input buffer
+  { vmMemory      :: [Int]      -- ^ 32768 Integers
+  , vmRegisters   :: [Register] -- ^ 8 Integers
+  , vmStack       :: [Int]      -- ^ Unbounded stack
+  , vmIP          :: Int        -- ^ Instruction Pointer
+  , vmHalt        :: Bool       -- ^ Catch fire?
+  , vmOutput      :: String     -- ^ VM's output
+  , vmInBuffer    :: String     -- ^ Input buffer
+  , vmBreakpoints :: [Breakpoint]
   } deriving (Eq, Show, Read)
 
 newVMState :: VMState
 newVMState = VMState
-  { vmMemory    = replicate 32768 0
-  , vmRegisters = replicate 8 0
-  , vmStack     = []
-  , vmIP        = 0
-  , vmHalt      = False
-  , vmOutput    = ""
-  , vmInBuffer  = ""
+  { vmMemory      = replicate 32768 0
+  , vmRegisters   = replicate 8 0
+  , vmStack       = []
+  , vmIP          = 0
+  , vmHalt        = False
+  , vmOutput      = ""
+  , vmInBuffer    = ""
+  , vmBreakpoints = []
   }
 
 newVMFromInts :: [Int] -> VMState
@@ -112,6 +118,9 @@ popStack = do
   modify (\s -> s { vmStack = tail stack })
   return $ head stack
 
+breakpointHit :: VMState -> Breakpoint -> Bool
+breakpointHit state (BPIP ip) = ip == vmIP state
+
 stepVM' :: VMUpdater ()
 stepVM' = do
   ip    <- readIP
@@ -160,9 +169,19 @@ stepVM = execState stepVM'
 
 runVM :: VMState -> VMState
 runVM state
-  | vmHalt state' = state'
+  | vmHalt state' = state
+  | bphit         = state
   | otherwise     = runVM state'
-  where state' = stepVM state
+  where state'  = stepVM state
+        bphit   = any (breakpointHit state) (vmBreakpoints state)
+
+-- set breakpoint at next instruction, then runVM
+-- useful to step over calls
+stepOverVM :: VMState -> VMState
+stepOverVM state = runVM state { vmBreakpoints = bps }
+  where vmip  = vmIP state
+        vmop  = vmMemory state !! vmip
+        bps   = nub $ BPIP (vmip + numArgs vmop + 1) : vmBreakpoints state
 
 saveVM :: VMState -> FilePath -> IO ()
 saveVM state file = writeFile file $ show state
