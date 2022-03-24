@@ -26,16 +26,18 @@ import qualified Brick.Widgets.Border.Style as Bs
 
 data UIEvent  = StepEvent deriving (Eq, Show)
 data UINames  = OutputView deriving (Eq, Show, Ord)
-data UIMode   = ModeMain | ModeMemory | ModeMemDiff deriving (Eq, Show)
+data UIMode   = ModeCommand | ModeInteractive | ModeMemory | ModeMemDiff deriving (Eq, Show)
 
 data UIState = UIState
-  { vmState   :: VMState
-  , running   :: Bool
-  , uiMode    :: UIMode
-  , memDPage  :: Int      -- ^ Mem dump page
-  , memDCols  :: Int      -- ^ Mem dump columns
-  , memDRows  :: Int      -- ^ Mem dump rows
-  , memDSave  :: [Int]    -- ^ Mem dump save, 32768 Integers
+  { vmState     :: VMState
+  , running     :: Bool
+  , uiMode      :: UIMode
+  , memDPage    :: Int      -- ^ Mem dump page
+  , memDCols    :: Int      -- ^ Mem dump columns
+  , memDRows    :: Int      -- ^ Mem dump rows
+  , memDSave    :: [Int]    -- ^ Mem dump save, 32768 Integers
+  , command     :: String
+  , lastCommand :: String
   } deriving (Eq, Show)
 
 registersBrick :: UIState -> Widget n
@@ -104,20 +106,30 @@ memoryDiffBrick state = centerLayer $ B.borderWithLabel (str "Memory Diff") cont
         diffrow (i, old, new) = str $ hex i <> " | " <> hex old <> " -> " <> hex new
         content               = vBox $ map diffrow diff
 
+commandPromptBrick :: UIState -> Widget n
+commandPromptBrick state
+  | cmd == ""                   = hBox $ map str [ "[", lastcmd', "]", " > " ]
+  | otherwise                   = hBox $ map str [ "> ", cmd ]
+  where cmd       = command state
+        lastcmd   = lastCommand state
+        lastcmd'  = if lastcmd == "" then "step" else lastcmd
+
 drawUI :: UIState -> [ Widget UINames ]
 drawUI state
-  | memdiffui = [ memoryDiffBrick state, withAttr "faded" mainlayout ]
-  | memui     = [ memoryBrick state, withAttr "faded" mainlayout ]
-  | otherwise = [ mainlayout ]
-  where memui       = uiMode state == ModeMemory
-        memdiffui   = uiMode state == ModeMemDiff
+  | mode == ModeMemDiff     = [ memoryDiffBrick state, withAttr "faded" mainlayout ]
+  | mode == ModeMemory      = [ memoryBrick state, withAttr "faded" mainlayout ]
+  | mode == ModeInteractive = [ mainlayout ]
+  | otherwise               = [ cmdlayout ]
+  where mode        = uiMode state
         output'     = B.border $ viewport OutputView Vertical $ padRight Max $ strWrap $ vmOutput $ vmState state
         registers   = B.border $ registersBrick state
         opcodes     = B.border $ opCodeBrick state
         stack       = B.border $ stackBrick state
         inbuff      = B.border $ inputBrick state
         hotkeys     = B.border hotkeysBrick
+        prompt      = B.border $ commandPromptBrick state
         mainlayout  = joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> hotkeys)
+        cmdlayout   = joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> prompt <=> hotkeys)
 
 eventHandler :: UIState -> BrickEvent UINames UIEvent -> EventM UINames (Next UIState)
 eventHandler state (AppEvent StepEvent)
@@ -128,15 +140,15 @@ eventHandler state (AppEvent StepEvent)
         running'  = running state
         scroll    = vScrollToEnd (viewportScroll OutputView)
 eventHandler state (VtyEvent e)
-  | memdiffui = case e of
-    V.EvKey V.KEsc []       -> continue state { uiMode = ModeMain }
+  | mode == ModeMemDiff     = case e of
+    V.EvKey V.KEsc []       -> continue state { uiMode = ModeCommand }
     _                       -> continue state
-  | memui     = case e of
-    V.EvKey V.KEsc []       -> continue state { uiMode = ModeMain }
+  | mode == ModeMemory      = case e of
+    V.EvKey V.KEsc []       -> continue state { uiMode = ModeCommand }
     V.EvKey V.KPageDown []  -> continue state { memDPage = if page*cols*rows < 32768-cols*rows then page + 1 else page }
     V.EvKey V.KPageUp []    -> continue state { memDPage = if page > 0 then page - 1 else page }
     _                       -> continue state
-  | otherwise = case e of
+  | mode == ModeInteractive = case e of
     V.EvKey (V.KFun 10) []  -> halt state
     V.EvKey (V.KFun 9) []   -> continue state { vmState = stepOverVM vms }
     V.EvKey (V.KFun 8) []   -> continue state { uiMode = ModeMemDiff, running = False }
@@ -151,15 +163,30 @@ eventHandler state (VtyEvent e)
     V.EvKey (V.KChar c) []  -> continue state { vmState = vms { vmInBuffer = inb <> [c] } }
     V.EvKey V.KEnter []     -> continue state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
     _                       -> continue state
+  | mode == ModeCommand     = case e of
+    V.EvKey (V.KFun 10) []  -> halt state
+    V.EvKey (V.KFun 9) []   -> continue state { vmState = stepOverVM vms }
+    V.EvKey (V.KFun 8) []   -> continue state { uiMode = ModeMemDiff, running = False }
+    V.EvKey (V.KFun 7) []   -> continue state { memDSave = vmMemory vms }
+    V.EvKey (V.KFun 6) []   -> continue state { uiMode = ModeMemory, running = False }
+    V.EvKey (V.KFun 5) []   -> continue state'
+    V.EvKey (V.KFun 4) []   -> continue state { running = not $ running state }
+    V.EvKey (V.KFun 2) []   -> liftIO (saveVM (vmState state) "vm.state") >> continue state
+    V.EvKey (V.KFun 3) []   -> do
+                                vms' <- liftIO (loadVM "vm.state")
+                                continue $ state { vmState = vms' }
+    V.EvKey (V.KChar c) []  -> continue state { command = cmd <> [c] }
+    V.EvKey V.KEnter []     -> continue state
+    _                       -> continue state
     where vmstate'  = stepVM $ vmState state
           state'    = state { vmState = vmstate' }
           vms       = vmState state
           inb       = vmInBuffer vms
-          memui     = uiMode state == ModeMemory
-          memdiffui = uiMode state == ModeMemDiff
+          mode      = uiMode state
           page      = memDPage state
           cols      = memDCols state
           rows      = memDRows state
+          cmd       = command state
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap
@@ -174,14 +201,17 @@ app = App { appDraw         = drawUI
           }
 
 uiState :: VMState -> UIState
-uiState state = UIState { vmState   = state
-                        , running   = False
-                        , uiMode    = ModeMain
-                        , memDPage  = 0
-                        , memDCols  = 16
-                        , memDRows  = 32
-                        , memDSave  = replicate 32768 0
-                        }
+uiState state = UIState
+  { vmState     = state
+  , running     = False
+  , uiMode      = ModeCommand
+  , memDPage    = 0
+  , memDCols    = 16
+  , memDRows    = 32
+  , memDSave    = replicate 32768 0
+  , command     = ""
+  , lastCommand = ""
+  }
 
 brickRun :: VMState -> IO VMState
 brickRun state = do
