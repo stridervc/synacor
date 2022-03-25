@@ -136,18 +136,24 @@ execCommand :: UIState -> UIState
 execCommand state = case cmd of
   ""      -> if lastall == "" then state else execCommand $ state { command = lastall }
   "i"     -> state' { uiMode = ModeInteractive }
-  "step"  -> state' { vmState = stepVM vms }
+  "step"  -> state' { vmState = stepVM vms, running = False }
   "run"   -> state' { running = not $ running state }
-  "over"  -> state' { vmState = stepOverVM vms }
+  "runi"  -> state' { running = True, uiMode = ModeInteractive }
+  "stop"  -> state' { running = False }
+  "over"  -> state' { vmState = addBreakpoint vms (BPIP nextip), running = True }
   "bp"    -> state' { vmState = addBreakpoint vms (BPIP fromhex) }
+  "cbp"   -> state' { vmState = delBreakpoint vms (BPIP fromhex) }
   _       -> invcmd
   where cmd     = if null (command state) then "" else head $ words $ command state
         args    = tail $ words $ command state
         invcmd  = state { command = "" }
-        state'  = invcmd { lastCommand = command state }
+        state'  = invcmd { lastCommand = "step" }
         vms     = vmState state
         fromhex = fromHex $ head args
         lastall = lastCommand state
+        op      = vmMemory vms !! ip
+        ip      = vmIP vms
+        nextip  = ip + 1 + numArgs op
 
 eventHandler :: UIState -> BrickEvent UINames UIEvent -> EventM UINames (Next UIState)
 eventHandler state (AppEvent StepEvent)
@@ -182,7 +188,7 @@ eventHandler state (VtyEvent e)
                                 continue $ state { vmState = vms' }
     V.EvKey (V.KChar c) []  -> continue state { vmState = vms { vmInBuffer = inb <> [c] } }
     V.EvKey V.KEnter []     -> continue state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
-    V.EvKey V.KEsc []       -> continue state { uiMode = ModeCommand }
+    V.EvKey V.KEsc []       -> scroll >> continue state { uiMode = ModeCommand }
     _                       -> continue state
   | mode == ModeCommand     = case e of
     V.EvKey (V.KFun 10) []  -> halt state
@@ -198,7 +204,7 @@ eventHandler state (VtyEvent e)
                                 continue $ state { vmState = vms' }
     V.EvKey (V.KChar c) []  -> continue state { command = cmd <> [c] }
     V.EvKey V.KBS []        -> continue state { command = if cmd == "" then "" else init cmd }
-    V.EvKey V.KEnter []     -> continue $ execCommand state
+    V.EvKey V.KEnter []     -> scroll >> continue (execCommand state)
     _                       -> continue state
     where vmstate'  = stepVM $ vmState state
           state'    = state { vmState = vmstate' }
@@ -209,6 +215,7 @@ eventHandler state (VtyEvent e)
           cols      = memDCols state
           rows      = memDRows state
           cmd       = command state
+          scroll    = vScrollToEnd (viewportScroll OutputView)
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap

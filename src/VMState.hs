@@ -12,6 +12,7 @@ module VMState
   , saveVM
   , loadVM
   , addBreakpoint
+  , delBreakpoint
   ) where
 
 import Decoder
@@ -179,6 +180,9 @@ runVM state
 
 addBreakpoint :: VMState -> Breakpoint -> VMState
 addBreakpoint state bp = state { vmBreakpoints = nub (bp : vmBreakpoints state) }
+
+delBreakpoint :: VMState -> Breakpoint -> VMState
+delBreakpoint state bp = state { vmBreakpoints = filter (/=bp) $ vmBreakpoints state }
 
 -- set breakpoint at next instruction, then runVM
 -- useful to step over calls
