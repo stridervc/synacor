@@ -108,11 +108,10 @@ memoryDiffBrick state = centerLayer $ B.borderWithLabel (str "Memory Diff") cont
 
 commandPromptBrick :: UIState -> Widget n
 commandPromptBrick state
-  | cmd == ""                   = hBox $ map str [ "[", lastcmd', "]", " > " ]
+  | cmd == ""                   = hBox $ map str [ "[", lastcmd, "]", " > " ]
   | otherwise                   = hBox $ map str [ "> ", cmd ]
   where cmd       = command state
         lastcmd   = lastCommand state
-        lastcmd'  = if lastcmd == "" then "step" else lastcmd
 
 drawUI :: UIState -> [ Widget UINames ]
 drawUI state
@@ -131,10 +130,21 @@ drawUI state
         mainlayout  = joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> hotkeys)
         cmdlayout   = joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> prompt <=> hotkeys)
 
+execCommand :: UIState -> UIState
+execCommand state = case cmd of
+  ""      -> if lastCommand state == "" then state else execCommand state { command = lastCommand state }
+  "i"     -> state' { uiMode = ModeInteractive }
+  "step"  -> state' { vmState = stepVM vms }
+  _       -> invcmd
+  where cmd     = command state
+        invcmd  = state { command = "" }
+        state'  = invcmd { lastCommand = cmd }
+        vms     = vmState state
+
 eventHandler :: UIState -> BrickEvent UINames UIEvent -> EventM UINames (Next UIState)
 eventHandler state (AppEvent StepEvent)
   | running'  = scroll >> continue state'
-  | otherwise = scroll >> continue state
+  | otherwise = continue state
   where vmstate'  = stepVM $ vmState state
         state'    = state { vmState = vmstate' }
         running'  = running state
@@ -162,6 +172,7 @@ eventHandler state (VtyEvent e)
                                 continue $ state { vmState = vms' }
     V.EvKey (V.KChar c) []  -> continue state { vmState = vms { vmInBuffer = inb <> [c] } }
     V.EvKey V.KEnter []     -> continue state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
+    V.EvKey V.KEsc []       -> continue state { uiMode = ModeCommand }
     _                       -> continue state
   | mode == ModeCommand     = case e of
     V.EvKey (V.KFun 10) []  -> halt state
@@ -176,7 +187,8 @@ eventHandler state (VtyEvent e)
                                 vms' <- liftIO (loadVM "vm.state")
                                 continue $ state { vmState = vms' }
     V.EvKey (V.KChar c) []  -> continue state { command = cmd <> [c] }
-    V.EvKey V.KEnter []     -> continue state
+    V.EvKey V.KBS []        -> continue state { command = if cmd == "" then "" else init cmd }
+    V.EvKey V.KEnter []     -> continue $ execCommand state
     _                       -> continue state
     where vmstate'  = stepVM $ vmState state
           state'    = state { vmState = vmstate' }
@@ -210,7 +222,7 @@ uiState state = UIState
   , memDRows    = 32
   , memDSave    = replicate 32768 0
   , command     = ""
-  , lastCommand = ""
+  , lastCommand = "step"
   }
 
 brickRun :: VMState -> IO VMState
