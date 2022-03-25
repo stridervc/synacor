@@ -76,6 +76,13 @@ stackBrick :: UIState -> Widget n
 stackBrick state = vBox $ zipWith (curry (str . show')) [0..] $ take 20 $ vmStack $ vmState state
   where show' (i, v)  = hex i <> " : " <> hex v
 
+memoryWatchBrick :: UIState -> Widget n
+memoryWatchBrick state = vBox $ map show' watch
+  where show' (n,a) = str $ n <> " : " <> a <> " : " <> hex (vmMemory (vmState state) !! fromHex a)
+        watch       = [ ("room", "0aac")
+                      , ("room", "0aad")
+                      ]
+
 hotkeysBrick :: Widget n
 hotkeysBrick = str $ intercalate " | " [ "F2 - Save", "F3 - Load", "F4 - Run", "F5 - Step", "F6 - Memory", "F7 - Mem Save", "F8 - Mem Diff", "F9 - Step Over", "F10 - Quit" ]
 
@@ -110,10 +117,10 @@ memoryDiffBrick state = centerLayer $ B.borderWithLabel (str "Memory Diff") cont
 
 commandPromptBrick :: UIState -> Widget n
 commandPromptBrick state
-  | cmd == ""                   = hBox $ map str [ "[", lastcmd, "]", " > " ]
-  | otherwise                   = hBox $ map str [ "> ", cmd ]
-  where cmd       = command state
-        lastcmd   = lastCommand state
+  | cmd == "" = hBox $ map str [ "[", lastcmd, "]", " > " ]
+  | otherwise = hBox $ map str [ "> ", cmd ]
+  where cmd     = command state
+        lastcmd = lastCommand state
 
 drawUI :: UIState -> [ Widget UINames ]
 drawUI state
@@ -129,8 +136,19 @@ drawUI state
         inbuff      = B.border $ inputBrick state
         hotkeys     = B.border hotkeysBrick
         prompt      = B.border $ commandPromptBrick state
-        mainlayout  = joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> hotkeys)
-        cmdlayout   = joinBorders ( (opcodes <+> output' <+> (registers <=> stack) ) <=> prompt <=> hotkeys)
+        memwatch    = B.border $ memoryWatchBrick state
+        mainlayout  = joinBorders ( ((opcodes <=> memwatch) <+> output' <+> (registers <=> stack) ) <=> hotkeys)
+        cmdlayout   = joinBorders ( ((opcodes <=> memwatch) <+> output' <+> (registers <=> stack) ) <=> prompt <=> hotkeys)
+
+writeMem :: VMState -> Int -> Int -> VMState
+writeMem vms addr val = vms { vmMemory = mem' }
+  where mem   = vmMemory vms
+        mem'  = take addr mem <> [val] <> drop (addr+1) mem
+
+setRoom :: VMState -> Int -> VMState
+setRoom vms room = vms'
+  where mem   = vmMemory vms
+        vms'  = writeMem (writeMem vms (fromHex "0aac") room) (fromHex "0aad") room
 
 execCommand :: UIState -> UIState
 execCommand state = case cmd of
@@ -143,6 +161,7 @@ execCommand state = case cmd of
   "over"  -> state' { vmState = addBreakpoint vms (BPIP nextip), running = True }
   "bp"    -> state' { vmState = addBreakpoint vms (BPIP fromhex) }
   "cbp"   -> state' { vmState = delBreakpoint vms (BPIP fromhex) }
+  "room"  -> state' { vmState = setRoom vms fromhex }
   _       -> invcmd
   where cmd     = if null (command state) then "" else head $ words $ command state
         args    = tail $ words $ command state
@@ -185,7 +204,7 @@ eventHandler state (VtyEvent e)
     V.EvKey (V.KFun 2) []   -> liftIO (saveVM (vmState state) "vm.state") >> continue state
     V.EvKey (V.KFun 3) []   -> do
                                 vms' <- liftIO (loadVM "vm.state")
-                                continue $ state { vmState = vms' }
+                                continue (state { vmState = vms' })
     V.EvKey (V.KChar c) []  -> continue state { vmState = vms { vmInBuffer = inb <> [c] } }
     V.EvKey V.KEnter []     -> continue state { vmState = vms { vmInBuffer = inb <> ['\n'] } }
     V.EvKey V.KEsc []       -> scroll >> continue state { uiMode = ModeCommand }
