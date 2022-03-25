@@ -2,7 +2,10 @@ module Decoder
   ( decodeOpCode
   , numArgs
   , hex
+  , fromHex
   ) where
+
+import Data.Char (ord)
 
 decodeOpCode :: Int -> String
 decodeOpCode 0  = "HALT"
@@ -68,3 +71,13 @@ hex n = padded
   where hexed   = hex' n
         pad     = replicate (4 - length hexed) '0'
         padded  = pad <> hexed
+
+fromHex :: String -> Int
+fromHex str
+  | length str < 4  = fromHex $ '0' : str
+  | otherwise       = sum $ zipWith conv [3,2,1,0] str
+  where conv p c    = (16 ^ p) * val c
+        val c       | i <= 57   = i - 48
+                    | i <= 90   = i - 65 + 10
+                    | otherwise = i - 97 + 10
+          where i   = ord c

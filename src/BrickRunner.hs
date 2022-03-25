@@ -48,7 +48,7 @@ registersBrick state = vBox [ reg 0, reg 1, reg 2, reg 3, reg 4, reg 5, reg 6, r
         reghlt  = str $ "HALT = " <> show ( vmHalt vmstate )
 
 opCodeRow :: UIState -> (Bool, Int) -> Widget n
-opCodeRow state (hi, i) = padRight (Pad (27-(length line + 2))) $ str line
+opCodeRow state (hi, i) = withAttr attr $ padRight (Pad (27-(length line + 2))) $ str line
   where vmstate   = vmState state
         op        = vmMemory vmstate !! i
         argA      = vmMemory vmstate !! (i + 1)
@@ -62,6 +62,8 @@ opCodeRow state (hi, i) = padRight (Pad (27-(length line + 2))) $ str line
         numargs   = numArgs op
         argStrs   = map show' $ take numargs [ argA, argB, argC ]
         line      = unwords $ addr : hi' : opstr : argStrs
+        hasbp     = elem (BPIP i) $ vmBreakpoints $ vmState state
+        attr      = if hasbp then "onred" else "normal"
 
 opCodeBrick :: UIState -> Widget n
 opCodeBrick state = vBox $ take 10 $ zipWith (curry (opCodeRow state)) (True : repeat False) ips
@@ -132,23 +134,31 @@ drawUI state
 
 execCommand :: UIState -> UIState
 execCommand state = case cmd of
-  ""      -> if lastCommand state == "" then state else execCommand state { command = lastCommand state }
+  ""      -> if lastall == "" then state else execCommand $ state { command = lastall }
   "i"     -> state' { uiMode = ModeInteractive }
   "step"  -> state' { vmState = stepVM vms }
+  "run"   -> state' { running = not $ running state }
+  "over"  -> state' { vmState = stepOverVM vms }
+  "bp"    -> state' { vmState = addBreakpoint vms (BPIP fromhex) }
   _       -> invcmd
-  where cmd     = command state
+  where cmd     = if null (command state) then "" else head $ words $ command state
+        args    = tail $ words $ command state
         invcmd  = state { command = "" }
-        state'  = invcmd { lastCommand = cmd }
+        state'  = invcmd { lastCommand = command state }
         vms     = vmState state
+        fromhex = fromHex $ head args
+        lastall = lastCommand state
 
 eventHandler :: UIState -> BrickEvent UINames UIEvent -> EventM UINames (Next UIState)
 eventHandler state (AppEvent StepEvent)
+  | hitbp     = continue state { running = False }
   | running'  = scroll >> continue state'
   | otherwise = continue state
   where vmstate'  = stepVM $ vmState state
         state'    = state { vmState = vmstate' }
         running'  = running state
         scroll    = vScrollToEnd (viewportScroll OutputView)
+        hitbp     = elem (BPIP (vmIP (vmState state))) $ vmBreakpoints $ vmState state
 eventHandler state (VtyEvent e)
   | mode == ModeMemDiff     = case e of
     V.EvKey V.KEsc []       -> continue state { uiMode = ModeCommand }
@@ -202,7 +212,10 @@ eventHandler state (VtyEvent e)
 eventHandler state _ = continue state
 
 attrMap :: UIState -> A.AttrMap
-attrMap s = A.attrMap V.defAttr [ ("faded", V.red `on` V.black) ]
+attrMap s = A.attrMap V.defAttr [ ("faded", V.red `on` V.black)
+                                , ("onred", V.white `on` V.red)
+                                , ("normal", V.white `on` V.black)
+                                ]
 
 app :: App UIState UIEvent UINames
 app = App { appDraw         = drawUI

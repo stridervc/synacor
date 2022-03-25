@@ -2,6 +2,7 @@
 
 module VMState
   ( VMState (..)
+  , Breakpoint (..)
   , newVMState
   , newVMFromInts
   , newVMFromFile
@@ -10,6 +11,7 @@ module VMState
   , stepOverVM
   , saveVM
   , loadVM
+  , addBreakpoint
   ) where
 
 import Decoder
@@ -169,19 +171,21 @@ stepVM = execState stepVM'
 
 runVM :: VMState -> VMState
 runVM state
-  | vmHalt state' = state
+  | vmHalt state  = state
   | bphit         = state
   | otherwise     = runVM state'
   where state'  = stepVM state
         bphit   = any (breakpointHit state) (vmBreakpoints state)
 
+addBreakpoint :: VMState -> Breakpoint -> VMState
+addBreakpoint state bp = state { vmBreakpoints = nub (bp : vmBreakpoints state) }
+
 -- set breakpoint at next instruction, then runVM
 -- useful to step over calls
 stepOverVM :: VMState -> VMState
-stepOverVM state = runVM state { vmBreakpoints = bps }
+stepOverVM state = runVM $ addBreakpoint state $ BPIP (vmip + numArgs vmop + 1)
   where vmip  = vmIP state
         vmop  = vmMemory state !! vmip
-        bps   = nub $ BPIP (vmip + numArgs vmop + 1) : vmBreakpoints state
 
 saveVM :: VMState -> FilePath -> IO ()
 saveVM state file = writeFile file $ show state
